@@ -1,0 +1,349 @@
+//Register controller with token..
+
+public function register()
+    {
+        $first_name="";
+        $data=[];
+        helper(['form']);
+
+        if ($this->request->getMethod()=='post') {
+            //let's do the validation IntlRuleBasedBreakIterator
+            $rules=[
+                    'first_name'=>'required|min_length[3]|max_length[50]',
+                    'last_name'=>'required|min_length[3]|max_length[50]',
+                    'email'=>'required|min_length[3]|max_length[50]|valid_email|is_unique[users.email]',
+                    'password'=>'required|min_length[3]|max_length[255]',
+                    'password_confirm'=>'matches[password]',
+                    'usertype' =>'required',
+                ];
+            if (! $this->validate($rules)) {
+                echo "invalid submission";
+                $data['validation']=$this->validator;
+            } else {
+                //store the user in database
+                $usermodel=new UserModel();
+                $petmodel= new Petmodel();
+                $user_id = 0;
+                $newData=[
+                        'first_name' =>$this->request->getVar('first_name'),
+                        'last_name' =>$this->request->getVar('last_name'),
+                        'phone' =>$this->request->getVar('ccode').$this->request->getVar('phone'),
+                            'email' =>$this->request->getVar('email'),
+                        'password' =>$this->request->getVar('password'),
+                        'usertype' =>$this->request->getVar('usertype'),
+                        'token'=>bin2hex(random_bytes(15)),
+                        'status'=>'inactive',
+                      ];
+
+                $usermodel->save($newData);
+
+                $userdb=$usermodel->where('email', $this->request->getVar('email'))->first();
+                $session=session();
+
+                $session->setFlashData('success', 'Sucessful Registeration');
+                $sessiondata=[
+                        'user_id'=>$userdb['id'],
+                        'first_name'=>$userdb['first_name'],
+                        'last_name'=>$userdb['last_name'],
+                        'phone' =>$userdb['phone'],
+                        'email'=>$userdb['email'],
+                        'usertype'=>$userdb['usertype'],
+                        'token'=>$userdb['token'],
+                        'isLoggedIn'=>false,
+                    ];
+
+                $session->set($sessiondata);
+
+                log_message('info', 'user created - {$newData=>first_name}');
+                log_message('info', 'user stored in session..{$newData}');
+
+
+                $petownerdata=[
+                'user_id' =>$userdb['id'],
+                'first_name' =>$this->request->getVar('first_name'),
+                'last_name' =>$this->request->getVar('last_name'),
+                'phone' =>$this->request->getVar('ccode').$this->request->getVar('phone'),
+                'email' =>$this->request->getVar('email'),
+            ];
+
+                if ($userdb['usertype'] == 'petparent') {
+                  //from Library;
+              //      $this->Petowner_send_otp->pet_otp_process($petownerdata);
+                    //$petmodel->save($petownerdata);
+                    //session()->set('isLoggedIn', true);
+
+            //---      $link = '/PetOwner_verify_otp';
+                  $this->Petowner_send_otp->pet_otp_process($petownerdata);
+
+          //----    $process =  $this->Petowner_send_otp->pet_otp_process($petownerdata);
+          //-----      $this->Email->Email_send($petownerdata,$process,$link);
+                  return redirect()->to(base_url('petowner_verify_otp'));
+                } elseif ($userdb['usertype'] == 'Vet') {
+                    return redirect()->to(base_url('vet_register'));
+                }
+            }
+        }
+    }
+
+//-----------verify otp process------------
+
+<?php namespace App\Controllers;
+
+use App\Models\Petmodel;
+use App\Libraries\Otp_process;
+use App\Libraries\Email_verification;
+/**
+ * PerOwner_verify_otp.
+ *
+ * @package AppControllers
+ * @author
+ * @since   Version
+ * @filesource
+ */
+use CodeIgniter\Controller;
+
+/**
+ *
+ */
+class PetOwner_verify_otp extends Controller
+{
+    /**
+     *
+     */
+     public function __construct()
+     {
+       $this->Pet_verify_otp = new Otp_process();
+       $this->Email_verify = new Email_verification();
+     }
+
+    public function index()
+    {
+    //  if (session()->has('success')) {
+        echo view('dashboard/dashboardheader');
+        echo view('petowner_verify_otp');
+      //}else {
+        //return redirect()->to(base_url('register'));
+      //}
+
+    }
+
+    public function PetOwner_verify_otp()
+    {
+        $petmodel = new Petmodel();
+
+        $petownerdata=[
+        'user_id'=>session()->get('user_id'),
+        'first_name'=>session()->get('first_name'),
+        'last_name'=>session()->get('last_name'),
+        'email'=>session()->get('email'),
+        'phone'=>session()->get('phone'),
+      ];
+
+
+        //from Library;
+        if ($this->Pet_verify_otp->otp_verify_process($petownerdata)) {
+            $this->Email_verify->Email_send($petownerdata);
+            $petmodel->save($petownerdata);
+            //session()->set('isLoggedIn',true);
+            session()->set('email_verify','email_verify');
+            session()->set('v_email',$petownerdata['email']);
+            return redirect()->to(base_url('login'));
+        }
+    }
+    //--------------------------------------------------------------------
+}
+
+
+/* End of file PerOwner_verify_otp.php */
+/* Location: ./application/Controllers/PerOwner_verify_otp.php */
+
+
+//------------------Email verification library file------------
+
+<?php
+
+namespace App\Libraries;
+/**
+ *
+ */
+class Email_verification
+{
+  public function Email_send($petownerdata)
+  {
+
+    $to = $petownerdata['email'];
+    $name = $petownerdata['first_name'];
+    $token = session()->get('token');
+
+    $message = 'Hi,'.$name. '<h1>Click the below Link for verification.</h1><br>'
+    .'<a href="'.base_url().'/Activate_email?token='.$token.'" style ="color:orange">Activate Now</a>
+    <p>DO NOT REPLY</p>';
+
+    $email = \Config\Services::email();
+
+    $email->setFrom('shubh.jamdagni@gmail.com', 'My Furries');
+    $email->setTo($to);
+    //$email->setCC('another@another-example.com');
+    //$email->setBCC('them@their-example.com');
+
+    $email->setSubject('Verification Process');
+    $email->setMessage($message);
+
+    if ($email->send()) {
+      //session()->set('success','success');
+      //session()->set('isLoggedIn',true)
+      //from Library;
+      //$this->Petowner_send_otp->pet_otp_process($petownerdata);
+      //$process;
+      //return redirect()->to(base_url('login'));
+      //session()->set('email_verify','email_verify');
+    }else {
+      return redirect()->to(base_url('register'));
+    }
+  }
+
+}
+
+ ?>
+
+//------------------------------Activate file
+
+
+<?php namespace App\Controllers;
+
+/**
+ * Activate_email.
+ *
+ * @package AppControllers
+ * @author
+ * @since   Version
+ * @filesource
+ */
+use CodeIgniter\Controller;
+
+/**
+ *
+ */
+class Activate_email extends Controller
+{
+    /**
+     *
+     */
+    public function index()
+    {
+        if (isset($_GET['token'])) {
+          $token = $_GET['token'];
+
+          $db = db_connect();
+          $builder = $db->table('users');
+          $builder->set('status','active');
+          $builder->where('token',$token);
+          $builder->update();
+          return redirect()->to(base_url('login'));
+        }
+    }
+
+    //--------------------------------------------------------------------
+
+}
+
+
+/* End of file Activate_email.php */
+/* Location: ./application/Controllers/Activate_email.php */
+
+
+//---------------Login with all activation condition
+
+
+<?php namespace App\Controllers;
+
+use App\Models\UserModel;
+use App\Models\Petmodel;
+
+class Login extends BaseController
+{
+    public function index()
+    {
+        $data=[];
+        helper(['form']);
+        echo view('templates/header', $data);
+        echo view('login');
+        echo view('templates/footer');
+    }
+
+
+    public function login()
+    {
+
+        $data=[];
+        helper(['form']);
+        if ($this->request->getMethod() == 'post') {
+
+            log_message("info", "Hello from Login") ;
+            $model=new UserModel();
+            $user=$model->where('email', $this->request->getVar('login_email'))->first();
+
+            if ((session()->get('email_verify')) && $user['status']==='inactive') {
+              //$uri = $this->uri->getSegment(2);
+              $v_email = session()->get('v_email');
+              $mail = '<html><a href="https://mail.google.com/mail/u/0/#inbox">Click here</a></html>';
+              session()->setFlashData('email_alert',"Check your provided email for verification. $v_email .$mail");
+              return redirect()->to(base_url('login'));
+              //return redirect()->to(base_url('Activate_email'));
+            }
+
+            if (!$user) {
+                log_message("error", "User not found ");
+                session()->setFlashData('error', 'User not found. Please register');
+                //sleep(4);
+                return redirect()->to(base_url('login'));
+            } else {
+                $this->setUserSession($user);
+                $password = $this->request->getVar('login_password');
+
+                /*if (session()->get('passchanged')=== true) {
+                  session()->setFlashData('changed','your password has been changed');
+                }*/
+
+                if ((password_verify($password, $user['password'])) && $user['status']==='active') {
+                    session()->set('isLoggedIn', true);
+                    session()->set('role', $user['usertype']);
+                    session()->set('user_id', $user['id']);
+                    //session()->set('pet_id',$user1['pet_id']);
+
+                    if ($user['usertype']==='Vet') {
+                        return redirect()->to(base_url('VetDashboard'));
+                    } elseif ($user['usertype']==='petparent') {
+                        return redirect()->to(base_url('PetOwnerDashboard'));
+                    } else {
+                        return redirect()->to(base_url('Baselanding'));
+                    }
+                } else {
+                    session()->setFlashData('pass_error', 'Password mismatch try again');
+                    return redirect()->to(base_url('login'));
+                    //return redirect()->to(base_url('register'));
+                }
+            }
+        }
+    }
+
+
+    private function setUserSession($user)
+    {
+        var_dump($user);
+        $data = [
+                    'id'=>$user['id'],
+                    'first_name'=>$user['first_name'],
+                    'last_name'=>$user['last_name'],
+                    'email'=>$user['email'],
+                    'isLoggedIn'=>false,
+                ];
+        session()->set($data);
+        return true;
+    }
+
+
+
+
+    //--------------------------------------------------------------------
+}
