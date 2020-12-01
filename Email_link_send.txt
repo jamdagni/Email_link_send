@@ -1,4 +1,4 @@
-//Register controller with token..
+///Register controller with token..
 
 public function register()
     {
